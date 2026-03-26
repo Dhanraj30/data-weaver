@@ -1,5 +1,7 @@
 # Order-to-Cash Graph Explorer
 
+![O2C Graph Explorer](public/images/hero-screenshot.png)
+
 An interactive graph-based data modeling and query system for SAP Order-to-Cash (O2C) business processes. Users can visually explore interconnected business entities and query the dataset using natural language, powered by an LLM that dynamically generates SQL.
 
 **Live Demo:** [https://id-preview--8b432772-a70d-46dd-b6cd-41d88665020e.lovable.app](https://id-preview--8b432772-a70d-46dd-b6cd-41d88665020e.lovable.app)

@@ -37,8 +37,8 @@ export default function Index() {
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-border bg-card">
-        <div className="w-7 h-7 rounded bg-foreground flex items-center justify-center">
-          <span className="text-background text-xs font-bold">☐</span>
+        <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
+          <span className="text-primary-foreground text-xs font-bold tracking-tight">D</span>
         </div>
         <nav className="flex items-center gap-1 text-sm text-muted-foreground">
           <span className="hover:text-foreground cursor-pointer">Mapping</span>
