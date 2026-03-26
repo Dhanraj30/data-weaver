@@ -23,25 +23,27 @@ You have access to a SAP Order-to-Cash (O2C) database with these tables:
 12. plants: plant, plant_name, sales_organization
 
 Key relationships (Order to Cash flow):
-- Sales Order → Sales Order Items (via sales_order)
-- Sales Order Items → Products (via material = product)
-- Sales Order → Customer (via sold_to_party = customer in business_partners)
-- Sales Order → Delivery (via outbound_delivery_items.reference_sd_document = sales_order)
-- Delivery → Billing (via billing_document_items.reference_sd_document = delivery_document)
-- Billing → Journal Entry (via journal_entry_items.reference_document = billing_document)
-- Billing → Accounting Document (via billing_document_headers.accounting_document = journal_entry_items.accounting_document)
-- Payment → Journal Entry (via payments.clearing_accounting_document = journal_entry_items.accounting_document)
+- Sales Order -> Sales Order Items (via sales_order)
+- Sales Order Items -> Products (via material = product)
+- Sales Order -> Customer (via sold_to_party = customer in business_partners)
+- Sales Order -> Delivery (via outbound_delivery_items.reference_sd_document = sales_order)
+- Delivery -> Billing (via billing_document_items.reference_sd_document = delivery_document)
+- Billing -> Journal Entry (via journal_entry_items.reference_document = billing_document)
+- Billing -> Accounting Document (via billing_document_headers.accounting_document = journal_entry_items.accounting_document)
+- Payment -> Journal Entry (via payments.clearing_accounting_document = journal_entry_items.accounting_document)
+
+IMPORTANT: Do NOT include semicolons at the end of SQL queries. Write clean SELECT statements without trailing semicolons.
 `;
 
-const SYSTEM_PROMPT = `You are Dodge AI, a Graph Agent specialized in analyzing Order-to-Cash (O2C) business processes. You help users explore relationships between sales orders, deliveries, billing documents, journal entries, and payments.
+const SYSTEM_PROMPT = `You are Dodge AI, a Graph Agent specialized in analyzing Order-to-Cash (O2C) business processes.
 
 ${SCHEMA_DESCRIPTION}
 
 RULES:
 1. You MUST ONLY answer questions related to this O2C dataset. If asked about unrelated topics (general knowledge, creative writing, coding help, etc.), respond: "This system is designed to answer questions related to the Order-to-Cash dataset only. Please ask about sales orders, deliveries, billing, payments, or related business processes."
-2. When you need data, generate a SQL query using the generate_sql tool. Only use SELECT statements. Never modify data.
-3. Always ground your answers in actual data from the database. Never make up numbers or facts.
-4. Present results clearly with bold key values. Use tables when showing multiple records.
+2. When you need data, generate a SQL query using the generate_sql tool. Only use SELECT statements. NEVER include semicolons in the SQL.
+3. Always ground your answers in actual data from the database. Never make up numbers.
+4. Present results clearly with bold key values. Use tables for multiple records.
 5. When tracing document flows, show the full chain: Sales Order → Delivery → Billing → Journal Entry → Payment.
 6. Keep responses concise and data-focused.`;
 
@@ -57,7 +59,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // First, check if we need SQL by asking the LLM with tool calling
+    // Ask LLM with tool calling to determine if SQL is needed
     const toolCallResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -75,12 +77,12 @@ serve(async (req) => {
             type: "function",
             function: {
               name: "generate_sql",
-              description: "Generate a SQL SELECT query to answer the user's question about the O2C dataset. Only SELECT queries are allowed.",
+              description: "Generate a SQL SELECT query to answer the user's question. Do NOT include semicolons.",
               parameters: {
                 type: "object",
                 properties: {
-                  sql: { type: "string", description: "The SQL SELECT query to execute" },
-                  explanation: { type: "string", description: "Brief explanation of what this query does" },
+                  sql: { type: "string", description: "SQL SELECT query without semicolons" },
+                  explanation: { type: "string", description: "What this query does" },
                 },
                 required: ["sql", "explanation"],
               },
@@ -94,12 +96,12 @@ serve(async (req) => {
       const errText = await toolCallResp.text();
       console.error("AI tool call error:", toolCallResp.status, errText);
       if (toolCallResp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited" }), {
+        return new Response(JSON.stringify({ error: "Rate limited, try again later." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (toolCallResp.status === 402) {
-        return new Response(JSON.stringify({ error: "Credits exhausted" }), {
+        return new Response(JSON.stringify({ error: "Credits exhausted." }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -117,75 +119,51 @@ serve(async (req) => {
       const toolCall = toolCalls[0];
       let args: any;
       try {
-        args = typeof toolCall.function.arguments === 'string' 
-          ? JSON.parse(toolCall.function.arguments) 
+        args = typeof toolCall.function.arguments === 'string'
+          ? JSON.parse(toolCall.function.arguments)
           : toolCall.function.arguments;
       } catch {
         args = { sql: '', explanation: '' };
       }
-      
-      sqlQuery = args.sql;
 
-      // Validate it's a SELECT query
-      if (sqlQuery && sqlQuery.trim().toUpperCase().startsWith("SELECT")) {
+      sqlQuery = (args.sql || '').replace(/;+\s*$/, '').trim();
+      console.log("Generated SQL:", sqlQuery);
+
+      if (sqlQuery && sqlQuery.toUpperCase().startsWith("SELECT")) {
         try {
-          const { data, error } = await supabase.rpc("", {}).maybeSingle();
-          // Use raw SQL via postgrest
-          const queryResp = await fetch(`${supabaseUrl}/rest/v1/rpc/`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: supabaseKey,
-              Authorization: `Bearer ${supabaseKey}`,
-            },
+          const { data, error } = await supabase.rpc('execute_readonly_query', {
+            query_text: sqlQuery,
           });
-
-          // Actually execute via direct pg query through supabase
-          // Use the supabase client to query
-          // Since we can't run raw SQL via supabase-js, we'll use PostgREST
-          // Let's use a different approach - fetch from each table as needed
-          
-          // Actually, let's create an RPC function approach
-          // For now, use the postgrest endpoint directly
-          const pgResp = await fetch(`${supabaseUrl}/rest/v1/rpc/execute_readonly_query`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: supabaseKey,
-              Authorization: `Bearer ${supabaseKey}`,
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({ query_text: sqlQuery }),
-          });
-
-          if (pgResp.ok) {
-            sqlResults = await pgResp.json();
+          if (error) {
+            console.error("RPC error:", error);
+            sqlResults = { error: error.message };
           } else {
-            const errText = await pgResp.text();
-            console.error("SQL execution error:", errText);
-            sqlResults = { error: "Query execution failed", details: errText };
+            sqlResults = data;
           }
+          console.log("SQL results:", JSON.stringify(sqlResults).slice(0, 500));
         } catch (e) {
           console.error("SQL execution error:", e);
-          sqlResults = { error: "Query execution failed" };
+          sqlResults = { error: String(e) };
         }
       }
     }
 
-    // Now generate the final response with the data
-    const finalMessages = [
+    // Build final messages
+    const finalMessages: any[] = [
       { role: "system", content: SYSTEM_PROMPT },
       ...messages,
     ];
 
-    if (sqlQuery && sqlResults) {
+    if (sqlQuery) {
+      const resultStr = JSON.stringify(sqlResults).slice(0, 4000);
       finalMessages.push({
-        role: "system",
-        content: `SQL Query executed: ${sqlQuery}\n\nResults (JSON): ${JSON.stringify(sqlResults).slice(0, 4000)}\n\nUse these results to answer the user's question. Format the answer clearly with markdown.`,
+        role: "assistant",
+        content: `I executed this SQL query: \`${sqlQuery}\``,
       });
-    } else if (choice?.message?.content) {
-      // No tool call needed, the model answered directly (likely a guardrail response)
-      // Stream the direct response
+      finalMessages.push({
+        role: "user",
+        content: `[SYSTEM] The SQL query returned these results: ${resultStr}\n\nNow answer the original question using this data. Be specific with numbers and values from the results.`,
+      });
     }
 
     // Stream the final response
